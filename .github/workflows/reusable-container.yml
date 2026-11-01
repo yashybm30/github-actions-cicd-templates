@@ -1,0 +1,47 @@
+name: Reusable container build
+on:
+  workflow_call:
+    inputs:
+      image: {type: string, required: true}
+      push: {type: boolean, default: false}
+permissions:
+  contents: read
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate image repository
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: '[[ "$IMAGE" =~ ^[a-z0-9][a-z0-9./_-]+$ ]]'
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate to GHCR for publishing
+        if: inputs.push
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ inputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ inputs.image }}:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Publish scanned image
+        if: inputs.push && github.event_name != 'pull_request'
+        run: docker push '${{ inputs.image }}:${{ github.sha }}'
